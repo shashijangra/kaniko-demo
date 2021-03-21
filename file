@@ -1,0 +1,60 @@
+token=$(az acr login --name $REGISTRY_NAME --expose-token | jq -r '.accessToken')
+cat << EOF | kubectl create -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kaniko-aks
+spec:
+  restartPolicy: Never
+  containers:
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:v1.0.0
+    imagePullPolicy: Always
+    args: ["--dockerfile=Dockerfile",
+            "--context=git://github.com/carlossg/kaniko-demo.git",
+            "--destination=kaniko.azurecr.io/kaniko-demo:latest",
+            "--cache=true"]
+    volumeMounts:
+    - name: docker-config
+      mountPath: /kaniko/.docker/
+    - name: docker-acr-config
+      mountPath: /kaniko/.docker/acr/
+    resources:
+      limits:
+        cpu: 1
+        memory: 1Gi
+  volumes:
+  - name: docker-config
+    configMap:
+      name: docker-config
+  - name: docker-acr-config
+    secret:
+      secretName: kaniko-secret
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: docker-config
+data:
+  config.json: |-
+    {
+      "auths": {
+            "kaniko.azurecr.io": {}
+        },
+        "credsStore": "acr"
+    }
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kaniko-secret
+stringData:
+  config.json: |-
+    {
+        "auths": {
+            "kaniko.azurecr.io": {
+                "identitytoken": "$token"
+            }
+        }
+    }
+EOF
